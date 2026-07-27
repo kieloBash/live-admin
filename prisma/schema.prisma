@@ -1,0 +1,238 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model accounts {
+  userId                   String
+  type                     String
+  provider                 String
+  providerAccountId        String
+  refresh_token            String?
+  access_token             String?
+  expires_at               Int?
+  token_type               String?
+  scope                    String?
+  id_token                 String?
+  session_state            String?
+  refresh_token_expires_in Int?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime
+  users                    users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model admin_profiles {
+  id     String @id
+  userId String @unique
+  users  users  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("admin-profiles")
+}
+
+model audit_logs {
+  id        String   @id
+  userId    String
+  action    String
+  metadata  Json?
+  createdAt DateTime @default(now())
+  level     String?
+  users     users    @relation(fields: [userId], references: [id])
+
+  @@index([createdAt])
+  @@index([userId, action])
+  @@map("audit-logs")
+}
+
+model customers {
+  id        String     @id
+  name      String     @unique
+  createdAt DateTime   @default(now())
+  invoices  invoices[]
+}
+
+model invoices {
+  id            String        @id
+  sku           String        @unique
+  subTotal      Int
+  tax           Int
+  grandTotal    Int
+  dateDelivered DateTime
+  dateIssued    DateTime      @default(now())
+  updatedAt     DateTime
+  customerId    String
+  freebies      Int?          @default(0)
+  sellerId      String
+  status        InvoiceStatus @default(COMPLETED)
+  platformId    String
+  customers     customers     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  platforms     platforms     @relation(fields: [platformId], references: [id], onDelete: Cascade)
+  users         users         @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  items         items[]
+
+  @@index([customerId])
+  @@index([dateDelivered])
+  @@index([dateIssued])
+  @@index([sellerId])
+}
+
+model item_categories {
+  id          String  @id
+  name        String  @unique
+  color       String?
+  icon        String?
+  quickPrices Int[]
+  items       items[]
+
+  @@map("item-categories")
+}
+
+model items {
+  id              String          @id
+  invoiceId       String
+  price           Int
+  categoryId      String
+  status          ItemStatus      @default(COMPLETED)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime
+  item_categories item_categories @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  invoices        invoices        @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([categoryId])
+  @@index([invoiceId])
+}
+
+model notifications {
+  id      String   @id
+  userId  String
+  title   String
+  message String
+  read    Boolean  @default(false)
+  sentAt  DateTime @default(now())
+  users   users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+}
+
+model password_tokens {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+  @@map("password-tokens")
+}
+
+model platforms {
+  id       String     @id
+  name     String     @unique
+  invoices invoices[]
+}
+
+model roles {
+  id       String  @id
+  roleName String  @unique
+  users    users[]
+}
+
+model sessions {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime
+  users        users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model shifts {
+  id            String        @id
+  userProfileId String
+  start         DateTime
+  end           DateTime
+  status        ShiftStatus
+  user_profiles user_profiles @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+}
+
+model user_preferences {
+  id            String   @id
+  userId        String   @unique
+  theme         String?  @default("light")
+  language      String?
+  notifyByEmail Boolean? @default(true)
+  users         users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user-preferences")
+}
+
+model user_profiles {
+  id        String   @id
+  userId    String   @unique
+  createdAt DateTime @default(now())
+  rate      Int
+  updatedAt DateTime
+  shifts    shifts[]
+  users     users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user-profiles")
+}
+
+model users {
+  id               String            @id
+  email            String            @unique
+  name             String
+  hashedPassword   String?
+  roleId           String
+  image            String?
+  phone            String?           @unique
+  isActive         Boolean?          @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime
+  emailVerified    DateTime?
+  isOnboarded      Boolean?          @default(false)
+  accounts         accounts[]
+  admin_profiles   admin_profiles?
+  audit_logs       audit_logs[]
+  invoices         invoices[]
+  notifications    notifications[]
+  sessions         sessions[]
+  user_preferences user_preferences?
+  user_profiles    user_profiles?
+  roles            roles             @relation(fields: [roleId], references: [id])
+
+  @@index([name])
+  @@index([roleId])
+}
+
+model verification_tokens {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+  @@map("verification-tokens")
+}
+
+enum InvoiceStatus {
+  JOYJOY
+  RTS
+  COMPLETED
+}
+
+enum ItemStatus {
+  CANCELLED
+  JOYJOY
+  RTS
+  COMPLETED
+}
+
+enum ShiftStatus {
+  NO_SHOW
+  CANCELLED
+  ASSIGNED
+  COMPLETED
+}
