@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getFullReport } from "@/lib/queries";
-import { buildReportWorkbook } from "@/lib/excel";
+import { dayBounds, isValidDate, rangeBounds } from "@/lib/dates";
 import { sendReportEmail } from "@/lib/email";
-import { dayBounds, rangeBounds, isValidDate } from "@/lib/dates";
+import { buildReportWorkbook } from "@/lib/excel";
+import { getFullReport } from "@/lib/queries";
+import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
       subject: `Sales Report — ${label}`,
       html: `<p>Sales report for <b>${label}</b> (sent manually).</p>
              <p>Invoices: ${data.summary.invoiceCount} ·
-             Gross: ₱${(data.summary.grossTotal / 100).toFixed(2)}</p>`,
+             Gross: ₱${(data.summary.subtotalTotal / 100).toFixed(2)}</p>`,
       filename: `sales-report-${label.replace(/\s+/g, "_")}.xlsx`,
       attachment: buffer,
       to,
