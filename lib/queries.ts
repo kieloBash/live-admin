@@ -364,3 +364,36 @@ export async function getFullReport(start: Date, end: Date) {
     rtsInvoices,
   };
 }
+
+export type DailyPoint = { day: string; revenue: number; orders: number };
+
+export async function getDailyPoints(
+  start: Date,
+  end: Date
+): Promise<DailyPoint[]> {
+  const rows = await prisma.$queryRaw<any[]>`
+    WITH per_invoice AS (
+      SELECT
+        inv.id,
+        to_char((inv."dateIssued" AT TIME ZONE 'Asia/Manila'), 'YYYY-MM-DD') AS day,
+        COALESCE(SUM(it.price), 0) AS inv_total
+      FROM invoices inv
+      LEFT JOIN items it ON it."invoiceId" = inv.id
+      WHERE inv."dateIssued" >= ${start} AND inv."dateIssued" < ${end}
+        AND inv.status = 'COMPLETED'
+      GROUP BY inv.id, day
+    )
+    SELECT
+      day               AS "day",
+      COALESCE(SUM(inv_total), 0) AS "revenue",
+      COUNT(*)          AS "orders"
+    FROM per_invoice
+    GROUP BY day
+    ORDER BY day ASC
+  `;
+  return rows.map((r: any) => ({
+    day: r.day,
+    revenue: n(r.revenue),
+    orders: n(r.orders),
+  }));
+}
