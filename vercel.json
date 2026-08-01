@@ -1,0 +1,13 @@
+{
+    "crons": [
+        {
+            "path": "/api/cron/daily-report",
+            "schedule": "0 8 * * *"
+        }
+    ],
+    "functions": {
+        "app/api/cron/daily-report/route.ts": {
+            "maxDuration": 60
+        }
+    }
+}
