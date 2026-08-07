@@ -459,3 +459,114 @@ export async function getDailyPoints(
     joyjoyAmount: n(r.joyjoyAmount),
   }));
 }
+
+// ---------------------------------------------------------------------------
+// Invoice activity by fixed time block + day-of-week. This intentionally
+// does NOT use the `shifts` table -- shift scheduling isn't wired into the
+// live logic yet, so instead of joining to actual shift rows, each COMPLETED
+// invoice is classified into a block purely from its own dateIssued hour,
+// and revenue/orders/units are grouped by (day-of-week, block). Distinct
+// seller count / names are included as a rough "who was working" proxy,
+// since without real shift durations there's no way to compute a
+// revenue-per-hour rate -- only revenue-per-block totals.
+//
+// TIMEZONE: "dateIssued" is stored as a UTC wall-clock value with no offset
+// attached. Bucketing by Manila calendar day / hour requires a DOUBLE
+// "AT TIME ZONE": dateIssued AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Manila'.
+// The first AT TIME ZONE anchors the naive value as UTC (-> timestamptz, the
+// correct absolute instant). The second converts that instant to Manila wall
+// time (-> naive timestamp again, but now numerically correct for Manila).
+// A SINGLE "AT TIME ZONE 'Asia/Manila'" on a naive column is WRONG: Postgres
+// instead treats the naive value as if it were already Manila local time and
+// shifts it the wrong way, silently producing hours/days off by up to 16
+// hours.
+//
+// Time blocks are fixed by business hours:
+//   Morning:   5:00am - 10:00am  (hour in [5, 11))
+//   Afternoon: 11:00am - 5:00pm  (hour in [11, 18))
+//   Evening:   6:00pm  - 12:00am (hour in [18, 24) or [0, 5))
+//
+// MIDNIGHT ROLLOVER: a sale between 12:00am-4:59am is the tail end of the
+// PREVIOUS calendar day's Evening session spilling past midnight -- there is
+// no shift scheduled for that window on its own. So the day-of-week used for
+// grouping is anchored back by one day whenever hour < 5, even though the
+// block is still 'Evening'. Example: a sale at 2026-07-27 00:09am Manila
+// (technically Monday) groups under Sunday/Evening, not Monday/Evening,
+// since it's really Sunday night's session, not a Monday one.
+//
+// CAVEATS:
+// - This is activity-by-time-of-day, not shift performance. It answers "when
+//   does revenue happen" and "who's usually invoicing then," not "was this
+//   scheduled shift profitable" -- that needs real shift data once it exists.
+// - "unitsSold" here counts items on COMPLETED invoices only, consistent
+//   with the MONEY POLICY at the top of this file.
+// - Read-only: only SELECTs from invoices/items. Nothing here writes to the
+//   database.
+export type TimeBlock = "Morning" | "Afternoon" | "Evening";
+
+export type InvoiceBlockRow = {
+  dayOfWeek: number;   // 0=Sun..6=Sat (Postgres EXTRACT(DOW) convention)
+  block: TimeBlock;
+  sellerCount: number; // distinct sellers who invoiced in this day+block
+  sellerNames: string[]; // distinct seller names, alphabetical
+  orders: number;
+  unitsSold: number;
+  revenue: number;
+};
+
+export async function getInvoiceActivityByBlock(
+  start: Date,
+  end: Date
+): Promise<InvoiceBlockRow[]> {
+  const rows = await prisma.$queryRaw<any[]>`
+    WITH invoice_time AS (
+      SELECT
+        inv.id                                                              AS "invoiceId",
+        inv."sellerId",
+        u.name                                                              AS "sellerName",
+        (inv."dateIssued" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Manila')    AS manila_ts,
+        EXTRACT(HOUR FROM (inv."dateIssued" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Manila'))::int AS hour
+      FROM invoices inv
+      JOIN users u ON u.id = inv."sellerId"
+      WHERE inv."dateIssued" >= ${start} AND inv."dateIssued" < ${end}
+        AND inv.status = 'COMPLETED'
+    ),
+    invoice_blocked AS (
+      SELECT
+        "invoiceId", "sellerId", "sellerName",
+        -- Shifts only cover 5am-12am; a sale between 12am-5am is the tail
+        -- end of the PREVIOUS day's Evening session rolling past midnight,
+        -- not the start of today. Anchor the business day back by one when
+        -- hour < 5 so it groups with the session it actually belongs to.
+        EXTRACT(DOW FROM (CASE WHEN hour < 5 THEN manila_ts - INTERVAL '1 day' ELSE manila_ts END))::int AS dow,
+        CASE
+          WHEN hour >= 5  AND hour < 11 THEN 'Morning'
+          WHEN hour >= 11 AND hour < 18 THEN 'Afternoon'
+          ELSE 'Evening'
+        END AS block
+      FROM invoice_time
+    )
+    SELECT
+      ib.dow                                              AS "dayOfWeek",
+      ib.block                                             AS "block",
+      COUNT(DISTINCT ib."sellerId")                        AS "sellerCount",
+      ARRAY_AGG(DISTINCT ib."sellerName" ORDER BY ib."sellerName") AS "sellerNames",
+      COUNT(DISTINCT ib."invoiceId")                       AS "orders",
+      COUNT(it.id)                                         AS "unitsSold",
+      COALESCE(SUM(it.price), 0)                           AS "revenue"
+    FROM invoice_blocked ib
+    LEFT JOIN items it ON it."invoiceId" = ib."invoiceId"
+    GROUP BY ib.dow, ib.block
+    ORDER BY ib.dow,
+      CASE ib.block WHEN 'Morning' THEN 1 WHEN 'Afternoon' THEN 2 ELSE 3 END
+  `;
+  return rows.map((r: any) => ({
+    dayOfWeek: n(r.dayOfWeek),
+    block: r.block as TimeBlock,
+    sellerCount: n(r.sellerCount),
+    sellerNames: Array.isArray(r.sellerNames) ? r.sellerNames : [],
+    orders: n(r.orders),
+    unitsSold: n(r.unitsSold),
+    revenue: n(r.revenue),
+  }));
+}

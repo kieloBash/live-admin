@@ -25,6 +25,16 @@ export interface WeeklyTopRow {
   hasComparison?: boolean;
 }
 
+export interface InvoiceBlockRow {
+  dayOfWeek: number;                              // 0=Sun..6=Sat
+  block: "Morning" | "Afternoon" | "Evening";
+  sellerCount: number;
+  sellerNames: string[];
+  orders: number;
+  unitsSold: number;
+  revenue: number;
+}
+
 export interface WeeklySummaryData {
   weekLabel: string;        // "2026-08-01 to 2026-08-07"
   revenue: number;          // week total
@@ -42,6 +52,7 @@ export interface WeeklySummaryData {
   days: WeeklyDayRow[];
   topCategories: WeeklyTopRow[];
   topSellers: WeeklyTopRow[];
+  invoiceActivity?: InvoiceBlockRow[];
 }
 
 const fmtMoney = (n: number) =>
@@ -68,6 +79,100 @@ const lastWeekDateLabel = (dateStr: string) => {
   d.setUTCDate(d.getUTCDate() - 7);
   return d.toISOString().slice(0, 10);
 };
+
+// Renders a Mon->Sun x Morning/Afternoon/Evening grid of invoice activity,
+// based purely on when invoices were issued (not actual shift schedules,
+// which aren't wired in yet). Helps spot which day/time combos generate
+// revenue and which are consistently quiet.
+const TIME_BLOCKS: Array<"Morning" | "Afternoon" | "Evening"> = [
+  "Morning",
+  "Afternoon",
+  "Evening",
+];
+const TIME_BLOCK_HOURS: Record<string, string> = {
+  Morning: "5am–10am",
+  Afternoon: "11am–5pm",
+  Evening: "6pm–12am",
+};
+// Display Monday->Sunday; dayOfWeek from the query is Postgres DOW (0=Sun).
+const WEEK_DISPLAY_ORDER = [6, 0, 1, 2, 3, 4, 5];
+const DOW_LABEL: Record<number, string> = {
+  0: "Sun",
+  1: "Mon",
+  2: "Tue",
+  3: "Wed",
+  4: "Thu",
+  5: "Fri",
+  6: "Sat",
+};
+
+function renderInvoiceActivity(
+  rows: InvoiceBlockRow[],
+  days: WeeklyDayRow[]
+): string {
+  const byKey = new Map(rows.map((r) => [`${r.dayOfWeek}-${r.block}`, r]));
+  // Map day-of-week -> actual calendar date for this week, from the same
+  // day rows used in the Daily Breakdown table above.
+  const dateByDow = new Map(
+    days.map((d) => [new Date(`${d.date}T00:00:00Z`).getUTCDay(), d.date])
+  );
+
+  // Colour-code revenue against the week's own range so quiet slots stand
+  // out without hardcoding a peso threshold.
+  const revenues = rows.filter((r) => r.revenue > 0).map((r) => r.revenue);
+  const maxRevenue = revenues.length ? Math.max(...revenues) : 0;
+
+  const cellBg = (revenue: number, hasData: boolean) => {
+    if (!hasData) return "#f9fafb"; // no completed invoices in this slot
+    if (maxRevenue === 0) return "#f3f4f6";
+    const ratio = revenue / maxRevenue;
+    if (ratio >= 0.66) return "#d1fae5"; // strong
+    if (ratio >= 0.33) return "#fef3c7"; // moderate
+    return "#fee2e2"; // weak
+  };
+
+  const headerCells = TIME_BLOCKS.map(
+    (block) => `
+      <td style="padding:8px 12px;font-size:11px;color:#6b7280;text-transform:uppercase;text-align:center;">
+        ${block}<div style="font-weight:400;text-transform:none;font-size:10px;">${TIME_BLOCK_HOURS[block]}</div>
+      </td>`
+  ).join("");
+
+  const bodyRows = WEEK_DISPLAY_ORDER.map((dow) => {
+    const cells = TIME_BLOCKS.map((block) => {
+      const row = byKey.get(`${dow}-${block}`);
+      const hasData = !!row && row.orders > 0;
+      return `
+        <td style="padding:10px 12px;text-align:center;border:1px solid #e5e7eb;background:${cellBg(row?.revenue ?? 0, hasData)};">
+          ${hasData
+          ? `<div style="font-weight:700;color:#111827;font-size:13px;">${fmtMoney(row!.revenue)}</div>
+                     <div style="font-size:11px;color:#6b7280;margin-top:2px;">${row!.orders} order${row!.orders === 1 ? "" : "s"} · ${row!.unitsSold} units</div>
+                     <div style="font-size:11px;color:#9ca3af;margin-top:4px;">${row!.sellerNames.join(", ")}</div>`
+          : `<span style="color:#d1d5db;font-size:12px;">no sales</span>`
+        }
+        </td>`;
+    }).join("");
+    const dateLabel = dateByDow.get(dow);
+    return `
+      <tr>
+        <td style="padding:10px 12px;font-weight:600;color:#374151;border:1px solid #e5e7eb;background:#f9fafb;">
+          ${DOW_LABEL[dow]}${dateLabel ? `<div style="font-weight:400;font-size:11px;color:#9ca3af;">${dateLabel}</div>` : ""}
+        </td>
+        ${cells}
+      </tr>`;
+  }).join("");
+
+  return `
+      <h2 style="font-size:15px;color:#111827;margin:0 0 4px;">⏱️ Invoice Activity by Time of Day</h2>
+      <p style="font-size:12px;color:#9ca3af;margin:0 0 8px;">Based on when invoices were issued · not yet tied to scheduled shifts · green = strong, yellow = moderate, red = weak</p>
+      <table style="width:100%;border-collapse:collapse;">
+        <tr>
+          <td></td>
+          ${headerCells}
+        </tr>
+        ${bodyRows}
+      </table>`;
+}
 
 export function renderWeeklySummary(d: WeeklySummaryData): string {
   const metric = (label: string, value: string, sub?: string) => `
@@ -196,6 +301,8 @@ export function renderWeeklySummary(d: WeeklySummaryData): string {
           ${sellerRows || `<tr><td style="padding:8px 16px;color:#9ca3af;">No sales this week</td></tr>`}
         </table>
       </div>
+
+      ${d.invoiceActivity ? renderInvoiceActivity(d.invoiceActivity, d.days) : ""}
     </div>
 
     <p style="text-align:center;color:#9ca3af;font-size:12px;margin-top:16px;">

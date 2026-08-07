@@ -11,6 +11,7 @@ import {
     getBySellerJoyjoy,
     getDailyPoints,
     getFullReport,
+    getInvoiceActivityByBlock,
     getSummary,
 } from "@/lib/queries";
 import {
@@ -54,7 +55,7 @@ async function handler(req: NextRequest) {
         // Full report (this week) for the Excel + summary/sellers/categories,
         // prior-week summary for the week-total comparison,
         // per-day points for both weeks for the daily breakdown.
-        const [report, prevSummary, thisDays, prevDays, prevSellers, sellerJoyjoy] =
+        const [report, prevSummary, thisDays, prevDays, prevSellers, sellerJoyjoy, invoiceActivity] =
             await Promise.all([
                 getFullReport(start, end),
                 getSummary(pStart, pEnd),
@@ -62,6 +63,7 @@ async function handler(req: NextRequest) {
                 getDailyPoints(pStart, pEnd),
                 getBySeller(pStart, pEnd),
                 getBySellerJoyjoy(start, end),
+                getInvoiceActivityByBlock(start, end),
             ]);
 
         const label = `${week.start} to ${week.end}`;
@@ -159,6 +161,7 @@ async function handler(req: NextRequest) {
                     hasComparison,
                 };
             }),
+            invoiceActivity,
         };
 
         const html = renderWeeklySummary(summaryData);
