@@ -5,7 +5,6 @@ import { buildReportWorkbook } from "@/lib/excel";
 import {
   getFullReport,
   getSummary,
-  // getTopProducts,
 } from "@/lib/queries";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -75,6 +74,7 @@ async function handler(req: NextRequest) {
         name: s.sellerName,
         orders: s.invoiceCount,
         revenue: s.subtotal,
+        items: s.itemCount,
       })),
     };
 

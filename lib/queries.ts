@@ -29,6 +29,7 @@ export type SellerRow = {
   sellerId: string;
   sellerName: string;
   invoiceCount: number;
+  itemCount: number;
   subtotal: number;
 };
 
@@ -167,10 +168,11 @@ export async function getBySeller(start: Date, end: Date): Promise<SellerRow[]> 
       u.id                      AS "sellerId",
       u.name                    AS "sellerName",
       COUNT(DISTINCT inv.id)    AS "invoiceCount",
+      COUNT(it.id)              AS "itemCount",
       COALESCE(SUM(it.price),0) AS "subtotal"
     FROM invoices inv
     JOIN users u ON u.id = inv."sellerId"
-    LEFT JOIN items it ON it."invoiceId" = inv.id
+    LEFT JOIN items it ON it."invoiceId" = inv.id AND it.status = 'COMPLETED'
     WHERE inv."dateIssued" >= ${start} AND inv."dateIssued" < ${end}
       AND inv.status = 'COMPLETED'
     GROUP BY u.id, u.name
@@ -180,6 +182,7 @@ export async function getBySeller(start: Date, end: Date): Promise<SellerRow[]> 
     sellerId: r.sellerId,
     sellerName: r.sellerName,
     invoiceCount: n(r.invoiceCount),
+    itemCount: n(r.itemCount),
     subtotal: n(r.subtotal),
   }));
 }

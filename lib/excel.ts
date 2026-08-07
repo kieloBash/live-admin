@@ -157,25 +157,30 @@ export async function buildReportWorkbook(
     { header: "Seller (Completed)", key: "seller", width: 30 },
     { header: "Invoices (Completed)", key: "invoices", width: 14 },
     { header: "Subtotal (Completed)", key: "subtotal", width: 20 },
+    { header: "Total Items (Completed)", key: "items", width: 14 },
   ];
   styleHeader(sel.getRow(1));
   let totalInvoicesbySeller = 0
+  let totalItemsbySeller = 0
   let totalAmountbySeller = 0
   data.bySeller.forEach((r) => {
     const row = sel.addRow({
       seller: r.sellerName,
       invoices: r.invoiceCount,
       subtotal: money(r.subtotal),
+      items: r.itemCount,
     });
     totalInvoicesbySeller += r.invoiceCount
     totalAmountbySeller += r.subtotal
+    totalItemsbySeller += r.itemCount
     row.getCell(3).numFmt = CURRENCY_FMT;
     row.font = { name: "Arial" };
   });
   let totalRowBySeller = sel.addRow({
     seller: "TOTAL",
     invoices: totalInvoicesbySeller,
-    subtotal: money(totalAmountbySeller)
+    subtotal: money(totalAmountbySeller),
+    items: totalItemsbySeller,
   })
   totalRowBySeller.getCell(3).numFmt = CURRENCY_FMT;
   totalRowBySeller.font = { name: "Arial" };

@@ -3,91 +3,93 @@
 // The "quality" row shows JOYJOY and RTS totals instead of refunds.
 
 export interface TopProduct {
-    name: string;   // SKU (used as product identifier)
-    revenue: number;
-    units: number;
+  name: string;   // SKU (used as product identifier)
+  revenue: number;
+  units: number;
 }
 
 export interface TopSeller {
-    name: string;
-    revenue: number;
-    orders: number;
+  name: string;
+  revenue: number;
+  orders: number;
+  items: number;
 }
 
 export interface DailySummaryData {
-    date: string;
+  date: string;
 
-    // Headline (all from item-price subtotal basis)
-    revenue: number;
-    orders: number;
-    unitsSold: number;
-    avgOrderValue: number;
+  // Headline (all from item-price subtotal basis)
+  revenue: number;
+  orders: number;
+  unitsSold: number;
+  avgOrderValue: number;
 
-    // Comparison
-    revenueVsYesterdayPct: number;
-    hasComparison: boolean;
+  // Comparison
+  revenueVsYesterdayPct: number;
+  hasComparison: boolean;
 
-    // Status quality (real: JOYJOY / RTS)
-    joyjoyAmount: number;
-    rtsTotal: number;
+  // Status quality (real: JOYJOY / RTS)
+  joyjoyAmount: number;
+  rtsTotal: number;
 
-    topProducts: TopProduct[];
-    topSellers: TopSeller[];
+  topProducts: TopProduct[];
+  topSellers: TopSeller[];
 
-    notes?: string;
+  notes?: string;
 }
 
 const fmtMoney = (n: number) =>
-    "₱" +
-    new Intl.NumberFormat("en-PH", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    }).format(n);
+  "₱" +
+  new Intl.NumberFormat("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n);
 
 const delta = (pct: number) => {
-    const up = pct >= 0;
-    const color = up ? "#059669" : "#dc2626";
-    const arrow = up ? "▲" : "▼";
-    return `<span style="color:${color};font-weight:600;">${arrow} ${Math.abs(
-        pct
-    ).toFixed(1)}%</span>`;
+  const up = pct >= 0;
+  const color = up ? "#059669" : "#dc2626";
+  const arrow = up ? "▲" : "▼";
+  return `<span style="color:${color};font-weight:600;">${arrow} ${Math.abs(
+    pct
+  ).toFixed(1)}%</span>`;
 };
 
 export function renderDailySummary(d: DailySummaryData): string {
-    const metric = (label: string, value: string, sub?: string) => `
+  const metric = (label: string, value: string, sub?: string) => `
     <td style="padding:12px 16px;border:1px solid #e5e7eb;vertical-align:top;">
       <div style="font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;">${label}</div>
       <div style="font-size:22px;font-weight:700;color:#111827;margin-top:4px;">${value}</div>
       ${sub ? `<div style="font-size:12px;color:#6b7280;margin-top:2px;">${sub}</div>` : ""}
     </td>`;
 
-    const productRows = d.topProducts
-        .map(
-            (p, i) => `
+  const productRows = d.topProducts
+    .map(
+      (p, i) => `
       <tr>
         <td style="padding:8px 16px;border-bottom:1px solid #f3f4f6;color:#374151;">${i + 1}. ${p.name}</td>
         <td style="padding:8px 16px;border-bottom:1px solid #f3f4f6;text-align:right;color:#6b7280;">${p.units} units</td>
         <td style="padding:8px 16px;border-bottom:1px solid #f3f4f6;text-align:right;font-weight:600;color:#111827;">${fmtMoney(p.revenue)}</td>
       </tr>`
-        )
-        .join("");
+    )
+    .join("");
 
-    const sellerRows = d.topSellers
-        .map(
-            (s, i) => `
+  const sellerRows = d.topSellers
+    .map(
+      (s, i) => `
       <tr>
         <td style="padding:8px 16px;border-bottom:1px solid #f3f4f6;color:#374151;">${i + 1}. ${s.name}</td>
         <td style="padding:8px 16px;border-bottom:1px solid #f3f4f6;text-align:right;color:#6b7280;">${s.orders} orders</td>
+        <td style="padding:8px 16px;border-bottom:1px solid #f3f4f6;text-align:right;color:#6b7280;">${s.items} units</td>
         <td style="padding:8px 16px;border-bottom:1px solid #f3f4f6;text-align:right;font-weight:600;color:#111827;">${fmtMoney(s.revenue)}</td>
       </tr>`
-        )
-        .join("");
+    )
+    .join("");
 
-    const aovSub = d.hasComparison
-        ? `${delta(d.revenueVsYesterdayPct)} vs yesterday`
-        : "no prior-day data";
+  const aovSub = d.hasComparison
+    ? `${delta(d.revenueVsYesterdayPct)} vs yesterday`
+    : "no prior-day data";
 
-    return `
+  return `
   <div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:680px;margin:0 auto;background:#f9fafb;padding:24px;">
     <div style="background:#111827;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0;">
       <h1 style="margin:0;font-size:20px;">LiveAdmin — Daily Sales Summary</h1>
@@ -128,11 +130,11 @@ export function renderDailySummary(d: DailySummaryData): string {
       </div>
 
       ${d.notes
-            ? `<div style="background:#f3f4f6;padding:12px 16px;border-radius:6px;color:#374151;font-size:14px;">
+      ? `<div style="background:#f3f4f6;padding:12px 16px;border-radius:6px;color:#374151;font-size:14px;">
                <strong>Notes:</strong> ${d.notes}
              </div>`
-            : ""
-        }
+      : ""
+    }
     </div>
 
     <p style="text-align:center;color:#9ca3af;font-size:12px;margin-top:16px;">
