@@ -187,6 +187,35 @@ export async function getBySeller(start: Date, end: Date): Promise<SellerRow[]> 
   }));
 }
 
+export type SellerJoyjoyRow = {
+  sellerId: string;
+  joyjoyAmount: number; // SUM item.price where invoice status = JOYJOY, per seller
+};
+
+// JOYJOY money by seller. Separate from getBySeller because that query's
+// WHERE/JOIN are scoped to COMPLETED invoices; JOYJOY is a different invoice
+// status entirely, so it needs its own unrestricted join per the FAN-OUT RULE.
+export async function getBySellerJoyjoy(
+  start: Date,
+  end: Date
+): Promise<SellerJoyjoyRow[]> {
+  const rows = await prisma.$queryRaw<any[]>`
+    SELECT
+      u.id                       AS "sellerId",
+      COALESCE(SUM(it.price), 0) AS "joyjoyAmount"
+    FROM invoices inv
+    JOIN users u ON u.id = inv."sellerId"
+    LEFT JOIN items it ON it."invoiceId" = inv.id
+    WHERE inv."dateIssued" >= ${start} AND inv."dateIssued" < ${end}
+      AND inv.status = 'JOYJOY'
+    GROUP BY u.id
+  `;
+  return rows.map((r: any) => ({
+    sellerId: r.sellerId,
+    joyjoyAmount: n(r.joyjoyAmount),
+  }));
+}
+
 export async function getByPlatform(start: Date, end: Date): Promise<PlatformRow[]> {
   const rows = await prisma.$queryRaw<any[]>`
     SELECT
@@ -368,7 +397,13 @@ export async function getFullReport(start: Date, end: Date) {
   };
 }
 
-export type DailyPoint = { day: string; revenue: number; orders: number };
+export type DailyPoint = {
+  day: string;
+  revenue: number;
+  orders: number;
+  unitsSold: number;    // items on COMPLETED invoices that day
+  joyjoyAmount: number; // SUM item.price where invoice status = JOYJOY that day
+};
 
 export async function getDailyPoints(
   start: Date,
@@ -379,24 +414,48 @@ export async function getDailyPoints(
       SELECT
         inv.id,
         to_char((inv."dateIssued" AT TIME ZONE 'Asia/Manila'), 'YYYY-MM-DD') AS day,
-        COALESCE(SUM(it.price), 0) AS inv_total
+        COALESCE(SUM(it.price), 0) AS inv_total,
+        COUNT(it.id) AS item_count
       FROM invoices inv
       LEFT JOIN items it ON it."invoiceId" = inv.id
       WHERE inv."dateIssued" >= ${start} AND inv."dateIssued" < ${end}
         AND inv.status = 'COMPLETED'
       GROUP BY inv.id, day
+    ),
+    per_day AS (
+      SELECT
+        day,
+        COALESCE(SUM(inv_total), 0) AS revenue,
+        COUNT(*)                    AS orders,
+        COALESCE(SUM(item_count), 0) AS units_sold
+      FROM per_invoice
+      GROUP BY day
+    ),
+    joyjoy_per_day AS (
+      SELECT
+        to_char((inv."dateIssued" AT TIME ZONE 'Asia/Manila'), 'YYYY-MM-DD') AS day,
+        COALESCE(SUM(it.price), 0) AS joyjoy_amount
+      FROM invoices inv
+      LEFT JOIN items it ON it."invoiceId" = inv.id
+      WHERE inv."dateIssued" >= ${start} AND inv."dateIssued" < ${end}
+        AND inv.status = 'JOYJOY'
+      GROUP BY day
     )
     SELECT
-      day               AS "day",
-      COALESCE(SUM(inv_total), 0) AS "revenue",
-      COUNT(*)          AS "orders"
-    FROM per_invoice
-    GROUP BY day
-    ORDER BY day ASC
+      COALESCE(pd.day, jj.day)          AS "day",
+      COALESCE(pd.revenue, 0)           AS "revenue",
+      COALESCE(pd.orders, 0)            AS "orders",
+      COALESCE(pd.units_sold, 0)        AS "unitsSold",
+      COALESCE(jj.joyjoy_amount, 0)     AS "joyjoyAmount"
+    FROM per_day pd
+    FULL JOIN joyjoy_per_day jj ON jj.day = pd.day
+    ORDER BY "day" ASC
   `;
   return rows.map((r: any) => ({
     day: r.day,
     revenue: n(r.revenue),
     orders: n(r.orders),
+    unitsSold: n(r.unitsSold),
+    joyjoyAmount: n(r.joyjoyAmount),
   }));
 }

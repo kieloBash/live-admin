@@ -7,6 +7,8 @@ import {
 import { sendReportEmail } from "@/lib/email";
 import { buildReportWorkbook } from "@/lib/excel";
 import {
+    getBySeller,
+    getBySellerJoyjoy,
     getDailyPoints,
     getFullReport,
     getSummary,
@@ -52,12 +54,15 @@ async function handler(req: NextRequest) {
         // Full report (this week) for the Excel + summary/sellers/categories,
         // prior-week summary for the week-total comparison,
         // per-day points for both weeks for the daily breakdown.
-        const [report, prevSummary, thisDays, prevDays] = await Promise.all([
-            getFullReport(start, end),
-            getSummary(pStart, pEnd),
-            getDailyPoints(start, end),
-            getDailyPoints(pStart, pEnd),
-        ]);
+        const [report, prevSummary, thisDays, prevDays, prevSellers, sellerJoyjoy] =
+            await Promise.all([
+                getFullReport(start, end),
+                getSummary(pStart, pEnd),
+                getDailyPoints(start, end),
+                getDailyPoints(pStart, pEnd),
+                getBySeller(pStart, pEnd),
+                getBySellerJoyjoy(start, end),
+            ]);
 
         const label = `${week.start} to ${week.end}`;
         const buffer = await buildReportWorkbook(report, label);
@@ -92,6 +97,8 @@ async function handler(req: NextRequest) {
             const point = thisByDate.get(dateStr);
             const rev = point?.revenue ?? 0;
             const ord = point?.orders ?? 0;
+            const unitsSold = point?.unitsSold ?? 0;
+            const joyjoyAmount = point?.joyjoyAmount ?? 0;
             const lwRev = prevByDow.get(dow) ?? 0;
             const hasComparison = lwRev > 0;
             days.push({
@@ -99,12 +106,24 @@ async function handler(req: NextRequest) {
                 date: dateStr,
                 revenue: rev,
                 orders: ord,
+                unitsSold,
+                joyjoyAmount,
                 lastWeekRevenue: lwRev,
                 vsLastWeekPct: hasComparison ? ((rev - lwRev) / lwRev) * 100 : 0,
                 hasComparison,
             });
             cursor.setDate(cursor.getDate() + 1);
         }
+
+        // Map previous week's seller revenue by sellerId, for the Top Sellers
+        // week-over-week comparison.
+        const prevSellerRevenueById = new Map(
+            prevSellers.map((s) => [s.sellerId, s.subtotal])
+        );
+        // Map this week's JOYJOY amount by sellerId, for the Top Sellers breakdown.
+        const sellerJoyjoyById = new Map(
+            sellerJoyjoy.map((s) => [s.sellerId, s.joyjoyAmount])
+        );
 
         const summaryData: WeeklySummaryData = {
             weekLabel: label,
@@ -122,12 +141,24 @@ async function handler(req: NextRequest) {
                 name: c.categoryName,
                 units: c.itemCount,
                 revenue: c.subtotal,
+                unitsSold: 0,
             })),
-            topSellers: report.bySeller.slice(0, 5).map((s) => ({
-                name: s.sellerName,
-                units: s.invoiceCount,
-                revenue: s.subtotal,
-            })),
+            topSellers: report.bySeller.slice(0, 5).map((s) => {
+                const lastWeekRevenue = prevSellerRevenueById.get(s.sellerId) ?? 0;
+                const hasComparison = lastWeekRevenue > 0;
+                return {
+                    name: s.sellerName,
+                    units: s.invoiceCount,
+                    unitsSold: s.itemCount,
+                    revenue: s.subtotal,
+                    joyjoyAmount: sellerJoyjoyById.get(s.sellerId) ?? 0,
+                    lastWeekRevenue,
+                    vsLastWeekPct: hasComparison
+                        ? ((s.subtotal - lastWeekRevenue) / lastWeekRevenue) * 100
+                        : 0,
+                    hasComparison,
+                };
+            }),
         };
 
         const html = renderWeeklySummary(summaryData);
